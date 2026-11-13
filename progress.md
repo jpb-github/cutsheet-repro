@@ -16,8 +16,8 @@ Last updated 2026-11-13. Read `CLAUDE.md` first (layout, rules, way of working),
 - [x] 3. Guillotine packer `core/cutting.py` (single deterministic run, cut tree, `check_layout`)
 - [x] 4. Search: multi-start, process pool (80 % of cores), 15 s default, Refine, never worse
 - [x] 5. Cutsheet data `core/cutsheet.py` (labels, pocket screw positions, cut instructions)
-- [ ] 6. PDF writer `app/cutsheet_pdf.py` (Qt QPdfWriter, A4 landscape)  <- NEXT
-- [ ] 7. Cutsheet and Refine buttons (Cutsheet where View was, left of Generate), background search, save, open PDF
+- [x] 6. PDF writer `app/cutsheet_pdf.py` (Qt QPdfWriter, A4 landscape)
+- [ ] 7. Cutsheet and Refine buttons (Cutsheet where View was, left of Generate), background search, save, open PDF  <- NEXT
 - [ ] 8. Finish: look at the rendered PDF, docs, full suite
 
 Each task is detailed in its plan file just before it is executed (task 2 shows the level of detail), tests first, only that task's tests run, then marked done. Commit/push only when asked; no release unless asked.
