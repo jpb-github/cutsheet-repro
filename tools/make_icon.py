@@ -1,7 +1,7 @@
 """Draw the application icon: python tools/make_icon.py [--out app/assets]
 
 Writes cutsheet.ico (16, 24, 32, 48, 64, 128 and 256 px, PNG-compressed) and cutsheet.png (256 px). Same style as the Multiboard
-Generator: a dark slate tile with a board cut into pieces (a 2 x 3 layout of rectangles separated by the saw kerf), one in the accent red.
+Generator: a dark slate tile with a sheet cut into pieces by edge-to-edge (guillotine) cuts, the saw kerf between them, one piece in the accent red.
 Needs PySide6 only (offscreen is fine); re-run it after changing the colours
 in app/theme.py and commit the result: the window uses app/assets/cutsheet.ico.
 """
@@ -20,11 +20,10 @@ from PySide6.QtGui import QBrush, QColor, QGuiApplication, QImage, QPainter  # n
 from app.theme import ACCENT, PAPER, SLATE  # noqa: E402
 
 SIZES = (16, 24, 32, 48, 64, 128, 256)
-W, H, GAP, OX, OY = 60.0, 38.0, 6.0, 32.0, 43.0          # a piece and the kerf on the 256 grid
-
-
-def piece(x: float, y: float, w: float = W, h: float = H) -> QRectF:
-    return QRectF(x, y, w, h)
+# The sheet (36, 52) to (220, 204) on the 256 grid, cut edge to edge: one cut across the sheet, then the top row in two, the
+# right one in two again, and the bottom row in three. (x, y, w, h); the 6 px between them is the kerf.
+PIECES = ((36, 52, 100, 84), (142, 52, 78, 39), (142, 97, 78, 39), (36, 142, 57, 62), (99, 142, 58, 62), (163, 142, 57, 62))
+RED = 4                                                    # the piece in the accent red
 
 
 def draw(size: int) -> QImage:
@@ -37,10 +36,9 @@ def draw(size: int) -> QImage:
     p.setPen(Qt.NoPen)
     p.setBrush(QBrush(QColor(SLATE)))
     p.drawRoundedRect(QRectF(8, 8, 240, 240), 54, 54)
-    for row in range(4):
-        for col in range(3):
-            p.setBrush(QBrush(QColor(ACCENT if (row, col) == (1, 1) else PAPER)))
-            p.drawRoundedRect(piece(OX + col * (W + GAP), OY + row * (H + GAP)), 6, 6)
+    for index, (x, y, w, h) in enumerate(PIECES):
+        p.setBrush(QBrush(QColor(ACCENT if index == RED else PAPER)))
+        p.drawRoundedRect(QRectF(x, y, w, h), 6, 6)
     p.end()
     return img
 
