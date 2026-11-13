@@ -1,5 +1,5 @@
 """The Drawer Blocks tab: the form of the block of drawers (generated from the catalogue) on the left; on the right, split in two, the
-live list of the pieces and the hardware (one table) and the perspective view of the block. View draws the block, Generate saves the
+live list of the pieces and the hardware (one table) and the perspective view of the block, always drawn. Generate saves the
 list as a CSV.
 
 It only emits generate_requested(part, params) with the normalised parameters. The list comes from core.drawer_rules through
@@ -15,10 +15,8 @@ from app.param_form import ParamForm, _scrolling
 from core.catalogue import Part, drawer_block_boxes, drawer_block_hardware, drawer_block_pieces, get_part
 from core.params import ParamError
 
-HINT = ("Give the space the block must fit in, facades and box included, all in mm. The box is two sides between a top and a bottom "
-        "with a thin back and the facades in front; the drawers are rectangular boxes with the bottom nailed under, on slides "
-        "outside of them. Pocket screws are chosen from the thickness of the sheet and the length of each joint. View draws the block "
-        "in perspective; Generate saves the pieces and the hardware as a CSV file.")
+HINT = ("Give the space the block must fit in (facades and box included), in mm. Drawers are boxes with the bottom nailed under, on "
+        "slides outside them. Pocket screws follow the sheet thickness and the joint length. Generate saves the list as a CSV file.")
 COLUMNS = ("Item", "Qty", "Length", "Width", "Thickness", "Material / detail")
 NO_VIEW = "Nothing to draw: the form has an error."
 
@@ -34,7 +32,6 @@ class DrawerBlocksTab(QWidget):
         super().__init__(parent)
         self._part = get_part("drawer_blocks")
         self._busy = False
-        self._viewed = False                       # View was pressed: the view then follows the form
         self.form = ParamForm(self._part)
         self.form.restore(settings.load_form("drawer_blocks"))
         self.table = QTableWidget(0, len(COLUMNS))
@@ -57,7 +54,6 @@ class DrawerBlocksTab(QWidget):
         self.generate_button.setObjectName("primary")
         self.generate_button.setDefault(True)
         self.generate_button.setCursor(Qt.PointingHandCursor)
-        self.view_button = QPushButton("View")
         self.reset_button = QPushButton("Reset to defaults")
         title = QLabel(self._part.label)
         title.setObjectName("partTitle")
@@ -65,11 +61,11 @@ class DrawerBlocksTab(QWidget):
         subtitle.setObjectName("partGroup")
         rule = QFrame()
         rule.setObjectName("rule")
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        buttons.addWidget(self.reset_button)
-        buttons.addWidget(self.view_button)
-        buttons.addWidget(self.generate_button)
+        buttons = QHBoxLayout()                                 # the bottom row: the help on the left, the buttons on the right
+        buttons.setSpacing(10)
+        buttons.addWidget(self.hint_label, 1)
+        buttons.addWidget(self.reset_button, 0, Qt.AlignBottom)
+        buttons.addWidget(self.generate_button, 0, Qt.AlignBottom)
         listing = QWidget()                                     # the list and its total, the top of the right side
         listing_layout = QVBoxLayout(listing)
         listing_layout.setContentsMargins(0, 0, 0, 0)
@@ -96,7 +92,6 @@ class DrawerBlocksTab(QWidget):
         inside.addWidget(rule)
         inside.addSpacing(10)
         inside.addLayout(body, 1)
-        inside.addWidget(self.hint_label)
         inside.addSpacing(6)
         inside.addLayout(buttons)
         layout = QVBoxLayout(self)
@@ -107,10 +102,10 @@ class DrawerBlocksTab(QWidget):
         self.form.changed.connect(self._update_view)
         self.form.changed.connect(self._remember)
         self.generate_button.clicked.connect(self._on_generate)
-        self.view_button.clicked.connect(self._on_view)
         self.reset_button.clicked.connect(self.form.reset)
         self._update_button()
         self._update_table()
+        self._draw()
 
     def _remember(self, *_args) -> None:
         """The last valid values of the form are kept for the next launch."""
@@ -126,7 +121,6 @@ class DrawerBlocksTab(QWidget):
 
     def _update_button(self, *_args) -> None:
         self.generate_button.setEnabled(self.form.is_valid() and not self._busy)
-        self.view_button.setEnabled(self.form.is_valid())
 
     def rows(self) -> list[tuple[str, ...]]:
         """The text of the list, one tuple per line: the pieces, then the hardware."""
@@ -167,14 +161,9 @@ class DrawerBlocksTab(QWidget):
         else:
             self.view.set_message(NO_VIEW)
 
-    def _on_view(self) -> None:
-        self._viewed = True
-        self._draw()
-
     def _update_view(self, *_args) -> None:
-        """Once the view has been asked for it follows the form (and says so when the form is invalid)."""
-        if self._viewed:
-            self._draw()
+        """The view always follows the form (and says so when the form is invalid)."""
+        self._draw()
 
     def _on_generate(self) -> None:
         params = self.form.params()

@@ -28,3 +28,15 @@ def test_other_kinds():
     for raw in ({"n": "0"}, {"n": "x"}, {"w": "elm"}, {"flag": "maybe"}):
         with pytest.raises(ParamError):
             normalise_values(params, raw)
+
+
+def test_a_parameter_that_does_not_apply_is_replaced_by_its_default():
+    params = (Param("many", "Many", "bool", False),
+              Param("one", "One", "length", "100mm", min=10, max=1000, when="!many"),
+              Param("a", "A", "length", "200mm", min=10, max=1000, when="many"))
+    assert normalise_values(params, {}) == {"many": False, "one": "100mm", "a": "200mm"}
+    assert normalise_values(params, {"one": "30cm", "a": "garbage"}) == {"many": False, "one": "300mm", "a": "200mm"}     # a is hidden: ignored
+    assert normalise_values(params, {"many": True, "one": "garbage", "a": "40cm"}) == {"many": True, "one": "100mm", "a": "400mm"}
+    with pytest.raises(ParamError) as e:
+        normalise_values(params, {"many": True, "a": "garbage"})
+    assert e.value.param == "a"

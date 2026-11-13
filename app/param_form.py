@@ -1,8 +1,11 @@
 """Parameter form generated from the catalogue, with live validation.
 
 One widget per Param; every edit goes through Part.normalise, so the rules and messages are exactly the CLI's and the
-cache's (the form invents none). Errors show under the field that the ParamError names. A length is a text box plus a
-mm / cm / in combo; its form value is the text with the unit added ("18" + "cm" = "18cm"). Used by the tabs of the parts.
+cache's (the form invents none). Errors show under the line of the field that the ParamError names. Parameters that share a
+`row` are on one line: the title of the row on the left, then a short label (a letter such as W, H, D, or a short word) and a narrow
+field for each, and one "mm" at the end when they are lengths; a typed unit (76cm, 3in) is still understood. A parameter without a
+row has its own line; its length is a text box plus a mm / cm / in combo (the form value is the text with the unit added).
+Used by the tabs of the parts.
 """
 import re
 
@@ -12,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxL
 
 from app.theme import set_invalid
 from core.catalogue import Part
-from core.params import Param, ParamError
+from core.params import Param, ParamError, applies
 
 UNITS = ("mm", "cm", "in")
 
@@ -34,6 +37,11 @@ def choice_label(choice: str) -> str:
 
 def _default_text(p: Param) -> str:
     return "" if p.default is None else str(p.default)
+
+
+def _plain(text: str) -> str:
+    """A canonical length shown without its unit on a line of lengths ("760mm" -> "760"); anything else as it is."""
+    return text[:-2] if text.endswith("mm") and text[:-2].replace(".", "", 1).isdigit() else text
 
 
 def split_length(text: str) -> tuple[str, str]:
@@ -94,25 +102,92 @@ class ParamForm(QWidget):
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         form.setContentsMargins(0, 0, 0, 0)
-        for p in part.params:
-            label = QLabel(p.label)
+        self._lines: list[tuple[str, list[Param]]] = []
+        for p in part.params:                                   # consecutive parameters with the same row share a line
+            if p.row and self._lines and self._lines[-1][0] == p.row:
+                self._lines[-1][1].append(p)
+            else:
+                self._lines.append((p.row or p.label, [p]))
+        self._form = form
+        self._line_shown: dict[str, bool] = {}
+        for title, params in self._lines:
+            label = QLabel(title)
             label.setObjectName("fieldLabel")
-            label.setMinimumWidth(190)
+            label.setMinimumWidth(115)
             label.setContentsMargins(0, 6, 0, 0)       # lines up with the text of the field beside it
-            form.addRow(label, self._row(p))
+            form.addRow(label, self._line(params))
         layout.addLayout(form)
         layout.addWidget(self.summary_label)
         layout.addStretch(1)
         self._valid = True
         self._revalidate(emit=False)
 
-    def _row(self, p: Param) -> QWidget:
+    def lines(self) -> list[tuple[str, list[str]]]:
+        """The lines of the form: the title and the names of the parameters on it."""
+        return [(title, [p.name for p in params]) for title, params in self._lines]
+
+    def line_visible(self, title: str) -> bool:
+        """Whether the line is shown: a line whose parameters do not apply (their `when` condition) is hidden."""
+        return self._line_shown.get(title, True)
+
+    def _update_lines(self) -> None:
+        values = {p.name: self._widgets[p.name].isChecked() for p in self.part.params if p.kind == "bool" and not p.when}
+        for row, (title, params) in enumerate(self._lines):
+            shown = applies(params[0], values)
+            self._line_shown[title] = shown
+            self._form.setRowVisible(row, shown)
+
+    def error_label(self, name: str) -> QLabel:
+        return self._error_labels[name]
+
+    def _line(self, params: list[Param]) -> QWidget:
+        shared = bool(params[0].row)
+        row = QWidget()
+        row.setMaximumWidth(470 if shared else 320)
+        box = QVBoxLayout(row)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(2)
+        if not shared:
+            box.addWidget(self._field(params[0], shared=False))
+            box.addWidget(self._error(params[0]))
+            return row
+        fields = QHBoxLayout()
+        fields.setSpacing(6)
+        last_length = max((i for i, p in enumerate(params) if p.kind == "length"), default=-1)
+        for i, p in enumerate(params):
+            field = self._field(p, shared=True)
+            if p.kind != "bool":                            # a check box carries its own text
+                letter = QLabel(p.short or p.label)
+                letter.setObjectName("fieldLetter")
+                letter.setToolTip(p.label)
+                fields.addWidget(letter)
+                field.setMaximumWidth(84)                   # four digits and a decimal point; the line stays compact
+            fields.addWidget(field)
+            if i == last_length:                            # the unit of the lengths, right after the last one
+                unit = QLabel("mm")
+                unit.setObjectName("fieldUnit")
+                fields.addWidget(unit)
+        fields.addStretch(1)
+        box.addLayout(fields)
+        for p in params:
+            box.addWidget(self._error(p))
+        return row
+
+    def _error(self, p: Param) -> QLabel:
+        error = QLabel()
+        error.setObjectName("fieldError")
+        error.setWordWrap(True)
+        error.setVisible(False)
+        self._error_labels[p.name] = error
+        return error
+
+    def _field(self, p: Param, shared: bool) -> QWidget:
         if p.kind == "bool":
-            w = QCheckBox()
+            w = QCheckBox(p.short or p.label if shared else "")
             w.setChecked(bool(p.default))
             w.toggled.connect(self._revalidate)
             edit = w
-        elif p.kind == "length":
+        elif p.kind == "length" and not shared:
             w = LengthField()
             w.set_text(_default_text(p))
             w.edited.connect(self._revalidate)
@@ -125,25 +200,17 @@ class ParamForm(QWidget):
             w.currentTextChanged.connect(self._revalidate)
             edit = w
         else:
-            w = QLineEdit(_default_text(p))
+            w = QLineEdit(_plain(_default_text(p)) if p.kind == "length" else _default_text(p))
             w.textChanged.connect(self._revalidate)
             edit = w
         w.setObjectName("field_" + p.name)
         w.setToolTip("%s (default: %s)" % (p.help or p.label, _default_text(p) or "generator default"))
+        if p.help and p.label not in w.toolTip():
+            w.setToolTip("%s: %s" % (p.label, w.toolTip()))
         self._invalid_target = getattr(self, "_invalid_target", {})
         self._invalid_target[p.name] = edit
-        error = QLabel()
-        error.setObjectName("fieldError")
         self._widgets[p.name] = w
-        self._error_labels[p.name] = error
-        row = QWidget()
-        row.setMaximumWidth(320)
-        box = QVBoxLayout(row)
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(2)
-        box.addWidget(w)
-        box.addWidget(error)
-        return row
+        return w
 
     def widget(self, name: str) -> QWidget:
         return self._widgets[name]
@@ -195,7 +262,9 @@ class ParamForm(QWidget):
                 if index >= 0:
                     w.setCurrentIndex(index)
         else:
-            w.setText("" if value is None else str(value))
+            p = next(p for p in self.part.params if p.name == name)
+            text = "" if value is None else str(value)
+            w.setText(_plain(text) if p.kind == "length" else text)
 
     def restore(self, values: dict) -> None:
         """Put remembered values back: only the parameters of this part, nothing else (a stale or damaged setting is ignored)."""
@@ -209,6 +278,7 @@ class ParamForm(QWidget):
             self.set_value(p.name, p.default if p.kind == "bool" else _default_text(p))
 
     def _revalidate(self, *_args, emit: bool = True) -> None:
+        self._update_lines()
         self._errors, self._summary = {}, ""
         try:
             self.part.normalise(self.raw())
@@ -218,6 +288,7 @@ class ParamForm(QWidget):
             self._summary = "%s: %s" % (label, e.message)
         for name, lab in self._error_labels.items():
             lab.setText(self._errors.get(name, ""))
+            lab.setVisible(name in self._errors)
             set_invalid(self._invalid_target[name], name in self._errors)
         self.summary_label.setText(self._summary)
         valid = not self._errors

@@ -19,7 +19,7 @@ class BlockView(QWidget):
         self.setObjectName("blockView")
         self.setMinimumHeight(160)
         self._faces = []
-        self._message = "Press View to draw the block."
+        self._message = ""
 
     def set_boxes(self, boxes: list[Box]) -> None:
         self._faces = project_faces(exterior(boxes)) if boxes else []

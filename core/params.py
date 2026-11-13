@@ -33,6 +33,9 @@ class Param:
     advanced: bool = False
     help: str = ""
     choices: tuple = ()            # for kind "choice": the allowed values (lower case)
+    row: str = ""                  # the title of the line of the form this parameter is on; consecutive parameters with the same row share it
+    short: str = ""                # the label in front of the field on a shared line: a letter (W, H, D ...) or a short word
+    when: str = ""                 # the name of a bool parameter (without a condition) that must be true ("!name": false) for this one to apply
 
 
 def fmt_mm(mm: float) -> str:
@@ -112,10 +115,23 @@ def _coerce(p: Param, value: object):
     raise ValueError("unknown parameter kind %r" % p.kind)
 
 
+def applies(p: Param, values: Mapping[str, object]) -> bool:
+    """Whether the parameter applies, given the coerced values of the parameters without a condition."""
+    if not p.when:
+        return True
+    name = p.when.lstrip("!")
+    return bool(values[name]) != p.when.startswith("!")
+
+
 def normalise_values(params: Sequence[Param], raw: Mapping[str, object]) -> dict[str, object]:
-    """Canonical values of every parameter, in params order; unknown keys are an error."""
+    """Canonical values of every parameter, in params order; unknown keys are an error. A parameter that does not apply (its `when`
+    condition is false) is ignored, whatever was typed: its default is used, so it never blocks and equal requests are equal."""
     known = {p.name for p in params}
     for key in raw:
         if key not in known:
             raise ParamError(key, "unknown parameter")
-    return {p.name: _coerce(p, raw[p.name] if p.name in raw else p.default) for p in params}
+    values: dict[str, object] = {p.name: _coerce(p, raw[p.name] if p.name in raw else p.default) for p in params if not p.when}
+    for p in params:
+        if p.when:
+            values[p.name] = _coerce(p, raw[p.name] if p.name in raw and applies(p, values) else p.default)
+    return {p.name: values[p.name] for p in params}

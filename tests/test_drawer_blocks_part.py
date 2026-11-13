@@ -6,7 +6,7 @@ import pytest
 
 from core.catalogue import PARTS, get_part
 from core.drawer_rules import pieces_to_csv
-from core.catalogue import drawer_block_hardware, drawer_block_pieces
+from core.catalogue import drawer_block_hardware, drawer_block_pieces, sheet_for
 from core.params import ParamError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -56,3 +56,41 @@ def test_a_failed_request_is_reported_and_writes_nothing(tmp_path):
     r = subprocess.run([sys.executable, str(SCRIPTS / "build_cutlist.py"), *args], capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 1 and r.stdout.strip().splitlines()[-1].startswith("FAILED: slide_height")
     assert not (tmp_path / inv.outputs[0]).exists()
+
+
+def test_the_sheet_and_kerf_defaults_and_canonical_values():
+    p = PART.normalise({})
+    assert (p["per_thickness"], p["sheet_length"], p["sheet_width"], p["kerf"]) == (False, "2400mm", "1200mm", "5mm")
+    assert (p["thick_sheet_length"], p["thin_sheet_width"]) == ("2400mm", "1200mm")
+    assert PART.normalise({"sheet_length": "240cm", "kerf": "3.2"})["sheet_length"] == "2400mm"
+    assert PART.normalise({"kerf": "3.2"})["kerf"] == "3.2mm"
+
+
+def test_sheet_for_gives_the_single_size_or_the_size_of_the_thickness():
+    p = PART.normalise({"sheet_length": "1220", "sheet_width": "610"})
+    assert sheet_for(p, "thick") == sheet_for(p, "thin") == (1220.0, 610.0)
+    q = PART.normalise({"per_thickness": True, "thick_sheet_length": "2440", "thick_sheet_width": "1220", "thin_sheet_length": "1500",
+                        "thin_sheet_width": "800", "sheet_length": "100"})
+    assert sheet_for(q, "thick") == (2440.0, 1220.0) and sheet_for(q, "thin") == (1500.0, 800.0)
+
+
+def test_a_piece_that_fits_no_sheet_is_refused_on_the_sheet_line():
+    with pytest.raises(ParamError) as e:
+        PART.normalise({"sheet_length": "700", "sheet_width": "700"})
+    assert e.value.param == "sheet_length" and "Box top and bottom" in e.value.message and "756 x 512" in e.value.message
+    PART.normalise({"sheet_length": "1200", "sheet_width": "1200"})                  # fits, the long side along either direction
+    PART.normalise({"sheet_length": "800", "sheet_width": "1200"})                   # fits only when rotated: allowed
+    with pytest.raises(ParamError) as e:
+        PART.normalise({"per_thickness": True, "thin_sheet_length": "600", "thin_sheet_width": "600"})
+    assert e.value.param == "thin_sheet_length" and "Box back" in e.value.message
+    PART.normalise({"per_thickness": True, "sheet_length": "100", "sheet_width": "100"})     # the single line does not apply
+
+
+def test_hidden_sheet_values_never_change_the_result():
+    assert PART.normalise({"per_thickness": True, "sheet_length": "garbage"}) == PART.normalise({"per_thickness": True})
+    assert PART.normalise({"thick_sheet_length": "garbage"}) == PART.normalise({})
+
+
+def test_the_csv_command_line_knows_nothing_of_sheets_or_kerf():
+    inv = PART.invocation(PART.normalise({"kerf": "3", "sheet_length": "1500"}), Path("."))
+    assert not any("sheet" in a or "kerf" in a for a in inv.args)

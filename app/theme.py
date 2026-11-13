@@ -74,6 +74,7 @@ QLabel#hint {{ background: {ACCENT_TINT}; color: {ACCENT_INK}; border: none; bor
 QLabel#fieldError {{ color: {ERROR}; font-size: 9pt; }}
 QLabel#formSummary {{ color: {ERROR}; font-size: 9.5pt; }}
 QLabel#fieldLabel {{ color: {MUTED}; }}
+QLabel#fieldLetter, QLabel#fieldUnit {{ color: {MUTED}; }}
 
 /* ---- table of pieces (Drawer Blocks) ---- */
 QTableWidget#pieceTable {{ background: #fff; border: 1px solid {LINE}; border-radius: 5px; gridline-color: {LINE};

@@ -94,22 +94,56 @@ def _rule_args(p: Mapping) -> dict:
     return {k: length_mm(p[k]) for k in DRAWER_LENGTHS if k != "screw_spacing"}
 
 
+def _sheet_params(prefix: str, row: str, what: str, when: str) -> tuple[Param, Param]:
+    """The length and the width of a sheet of MDF (2400 x 1200 is the largest the user buys), on one line."""
+    return (Param(prefix + "_length", row + " length", "length", "2400mm", min=100, max=5000, row=row, short="L", when=when,
+                  help="length of " + what),
+            Param(prefix + "_width", row + " width", "length", "1200mm", min=100, max=5000, row=row, short="W", when=when,
+                  help="width of " + what))
+
+
+def sheet_for(p: Mapping, material: str) -> tuple[float, float]:
+    """(length, width) in mm of the sheet of this material ("thick" or "thin"): the single size, or the one of the thickness."""
+    prefix = material + "_sheet" if p["per_thickness"] else "sheet"
+    return length_mm(p[prefix + "_length"]), length_mm(p[prefix + "_width"])
+
+
+def _fit_sheets(p: Mapping) -> None:
+    """Every piece must fit its sheet, in either orientation (MDF has no grain)."""
+    for piece in drawer_block_pieces(p):
+        sheet = sheet_for(p, piece.material)
+        if not (piece.length <= sheet[0] and piece.width <= sheet[1] or piece.length <= sheet[1] and piece.width <= sheet[0]):
+            where = "%s_sheet_length" % piece.material if p["per_thickness"] else "sheet_length"
+            raise ParamError(where, "%s (%g x %g) does not fit the %s sheet (%g x %g)" % (
+                piece.name, piece.length, piece.width, piece.material, sheet[0], sheet[1]))
+
+
 def _drawer_blocks() -> Part:
-    def length(name, label, default, lo, hi, help, advanced=False):
-        return Param(name, label, "length", default, min=lo, max=hi, help=help, advanced=advanced)
-    params = (length("width", "Available width", "760mm", 50, 3000, "the total width the block must fit in, facades included"),
-              length("height", "Available height", "350mm", 50, 3000, "the total height the block must fit in, facades included"),
-              length("depth", "Available depth", "540mm", 50, 1500, "the total depth the block must fit in, facade and back included"),
-              length("box_clearance", "Box clearance", "4mm", 0, 50, "taken once from each of the three dimensions (about half on each side)"),
-              Param("drawers", "Number of drawers", "int", 2, min=1, max=12, help="drawers one above the other"),
-              length("drawer_clearance", "Drawer clearance", "5mm", 0, 50, "the gap above and below every drawer and facade"),
-              length("thick", "Thick sheet", "18mm", 3, 50, "MDF of the box, the drawer sides, fronts and backs, and the facades"),
-              length("thin", "Thin sheet", "6mm", 2, 30, "MDF of the box back and the drawer bottoms"),
-              length("slide_thickness", "Slide thickness", "12mm", 0, 50, "the slides are outside the drawer, between it and the box side"),
-              length("slide_length", "Slide length", "500mm", 50, 1500, "also the depth of the drawers"),
-              length("slide_height", "Slide height", "35mm", 1, 200, "must not exceed the height of the drawer sides"),
-              length("slide_clearance", "Slide clearance", "0.5mm", 0, 5, "on each side of each slide (box to slide, slide to drawer)"),
-              length("screw_spacing", "Pocket screw spacing", "150mm", 50, 400, "the largest distance between two pocket screws along a joint (at least 2 per joint)"))
+    def length(name, label, default, lo, hi, help, row, short):
+        return Param(name, label, "length", default, min=lo, max=hi, help=help, row=row, short=short)
+    params = (length("width", "Available width", "760mm", 50, 3000, "the total width the block must fit in, facades included", "Space", "W"),
+              length("height", "Available height", "350mm", 50, 3000, "the total height the block must fit in, facades included", "Space", "H"),
+              length("depth", "Available depth", "540mm", 50, 1500, "the total depth the block must fit in, facade and back included", "Space", "D"),
+              length("box_clearance", "Box clearance", "4mm", 0, 50, "taken once from each of the three dimensions (about half on each side)",
+                     "Clearance", "Box"),
+              length("drawer_clearance", "Drawer clearance", "5mm", 0, 50, "the gap above and below every drawer and facade", "Clearance", "Drawer"),
+              length("slide_clearance", "Slide clearance", "0.5mm", 0, 5, "on each side of each slide (box to slide, slide to drawer)",
+                     "Clearance", "Slide"),
+              Param("drawers", "Number of drawers", "int", 2, min=1, max=12, help="drawers one above the other", row="Drawers", short="N"),
+              length("thick", "Thick sheet", "18mm", 3, 50, "MDF of the box, the drawer sides, fronts and backs, and the facades", "Thickness", "Thick"),
+              length("thin", "Thin sheet", "6mm", 2, 30, "MDF of the box back and the drawer bottoms", "Thickness", "Thin"),
+              length("slide_thickness", "Slide thickness", "12mm", 0, 50, "the slides are outside the drawer, between it and the box side",
+                     "Slide", "T"),
+              length("slide_length", "Slide length", "500mm", 50, 1500, "also the depth of the drawers", "Slide", "L"),
+              length("slide_height", "Slide height", "35mm", 1, 200, "must not exceed the height of the drawer sides", "Slide", "H"),
+              length("screw_spacing", "Pocket screw spacing", "150mm", 50, 400,
+                     "the largest distance between two pocket screws along a joint (at least 2 per joint)", "Screws", "Spacing"),
+              Param("per_thickness", "One size per thickness", "bool", False, row="Sheets", short="One size per thickness",
+                    help="tick to give a sheet size for the thick MDF and another for the thin MDF"),
+              *_sheet_params("sheet", "Sheet", "the sheet (all thicknesses)", "!per_thickness"),
+              *_sheet_params("thick_sheet", "Thick sheet", "the thick sheet", "per_thickness"),
+              *_sheet_params("thin_sheet", "Thin sheet", "the thin sheet", "per_thickness"),
+              length("kerf", "Saw kerf", "5mm", 0, 20, "the width of the cut of the saw blade", "Saw", "Kerf"))
 
     def names(p):
         return ("Drawer Blocks - %d drawers %sx%sx%s.csv" % (p["drawers"], fmt_mm(length_mm(p["width"])), fmt_mm(length_mm(p["height"])),
@@ -123,6 +157,7 @@ def _drawer_blocks() -> Part:
     def check(p):
         drawer_block_pieces(p)
         drawer_block_hardware(p)
+        _fit_sheets(p)
 
     return Part("drawer_blocks", "Drawer Blocks", "drawer_blocks", "Cutsheet", params,
                 "DrawerBlocks/skills/drawer-blocks-generator/scripts/build_cutlist.py", _names=names, _args=args, _check=check)
