@@ -1,6 +1,6 @@
 """The Drawer Blocks tab: the form of the block of drawers (generated from the catalogue) on the left; on the right, split in two, the
 live list of the pieces and the hardware (one table) and the perspective view of the block, always drawn. Generate saves the
-list as a CSV.
+list as a CSV; Cutsheet packs the pieces on the sheets and writes a PDF, Refine searches further for a better layout.
 
 It only emits generate_requested(part, params) with the normalised parameters. The list comes from core.drawer_rules through
 core.catalogue; while the form is invalid the list is empty (the form shows the message of the field) and so is the view.
@@ -16,7 +16,7 @@ from core.catalogue import Part, drawer_block_boxes, drawer_block_hardware, draw
 from core.params import ParamError
 
 HINT = ("Give the space the block must fit in (facades and box included), in mm. Drawers are boxes with the bottom nailed under, on "
-        "slides outside them. Pocket screws follow the sheet thickness and the joint length. Generate saves the list as a CSV file.")
+        "slides outside them. Pocket screws follow the sheet thickness and the joint length. Generate saves the list as a CSV file; Cutsheet makes the PDF with the layout of the cuts on the sheets.")
 COLUMNS = ("Item", "Qty", "Length", "Width", "Thickness", "Material / detail")
 NO_VIEW = "Nothing to draw: the form has an error."
 
@@ -27,11 +27,14 @@ def _num(x: float) -> str:
 
 class DrawerBlocksTab(QWidget):
     generate_requested = Signal(object, dict)
+    cutsheet_requested = Signal(dict)
+    refine_requested = Signal(dict)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._part = get_part("drawer_blocks")
         self._busy = False
+        self._refine_ok = False
         self.form = ParamForm(self._part)
         self.form.restore(settings.load_form("drawer_blocks"))
         self.table = QTableWidget(0, len(COLUMNS))
@@ -54,6 +57,10 @@ class DrawerBlocksTab(QWidget):
         self.generate_button.setObjectName("primary")
         self.generate_button.setDefault(True)
         self.generate_button.setCursor(Qt.PointingHandCursor)
+        self.cutsheet_button = QPushButton("Cutsheet")
+        self.cutsheet_button.setToolTip("Pack the pieces on the sheets and write a PDF with the cuts")
+        self.refine_button = QPushButton("Refine")
+        self.refine_button.setToolTip("Search further for a layout with fewer sheets or less waste (after a cutsheet, same form)")
         self.reset_button = QPushButton("Reset to defaults")
         title = QLabel(self._part.label)
         title.setObjectName("partTitle")
@@ -65,6 +72,8 @@ class DrawerBlocksTab(QWidget):
         buttons.setSpacing(10)
         buttons.addWidget(self.hint_label, 1)
         buttons.addWidget(self.reset_button, 0, Qt.AlignBottom)
+        buttons.addWidget(self.refine_button, 0, Qt.AlignBottom)
+        buttons.addWidget(self.cutsheet_button, 0, Qt.AlignBottom)
         buttons.addWidget(self.generate_button, 0, Qt.AlignBottom)
         listing = QWidget()                                     # the list and its total, the top of the right side
         listing_layout = QVBoxLayout(listing)
@@ -102,6 +111,8 @@ class DrawerBlocksTab(QWidget):
         self.form.changed.connect(self._update_view)
         self.form.changed.connect(self._remember)
         self.generate_button.clicked.connect(self._on_generate)
+        self.cutsheet_button.clicked.connect(lambda: self._emit_params(self.cutsheet_requested))
+        self.refine_button.clicked.connect(lambda: self._emit_params(self.refine_requested))
         self.reset_button.clicked.connect(self.form.reset)
         self._update_button()
         self._update_table()
@@ -119,8 +130,16 @@ class DrawerBlocksTab(QWidget):
         self._busy = busy
         self._update_button()
 
+    def set_refine_enabled(self, enabled: bool) -> None:
+        """The window says whether a cutsheet of exactly this form exists, so that Refine has something to continue from."""
+        self._refine_ok = enabled
+        self._update_button()
+
     def _update_button(self, *_args) -> None:
-        self.generate_button.setEnabled(self.form.is_valid() and not self._busy)
+        ready = self.form.is_valid() and not self._busy
+        self.generate_button.setEnabled(ready)
+        self.cutsheet_button.setEnabled(ready)
+        self.refine_button.setEnabled(ready and self._refine_ok)
 
     def rows(self) -> list[tuple[str, ...]]:
         """The text of the list, one tuple per line: the pieces, then the hardware."""
@@ -169,3 +188,8 @@ class DrawerBlocksTab(QWidget):
         params = self.form.params()
         if params is not None:
             self.generate_requested.emit(self._part, params)
+
+    def _emit_params(self, signal) -> None:
+        params = self.form.params()
+        if params is not None:
+            signal.emit(dict(params))

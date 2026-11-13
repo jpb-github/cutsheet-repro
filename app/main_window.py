@@ -4,13 +4,16 @@ A thin layer over the core: it gets a JobService (and through it the Cache) and 
 tabs will emit generate_requested (the Drawer Blocks tab is empty for now). Worker threads write to the log through the log_requested signal.
 """
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import (QDockWidget, QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QTabWidget, QToolButton, QWidget)
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices
+from PySide6.QtWidgets import (QDockWidget, QFileDialog, QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QTabWidget, QToolButton, QWidget)
 
+from app.cutsheet_flow import CutsheetFlow, FlowResult, total_score
+from app.cutsheet_pdf import write_pdf
 from app.drawer_blocks_tab import DrawerBlocksTab
 from app.about import APP_NAME, show_about
 from app.job_controller import JobController
@@ -19,7 +22,8 @@ from app.wait_cursor import WaitCursor
 from app.save_flow import choose_destination, confirm_overwrite, report_save_error, run_save
 from app.settings import last_dir, remember_dir
 from core.cache import CacheError
-from core.catalogue import Part
+from core.catalogue import Part, drawer_block_hardware, drawer_block_pieces, get_part
+from core.cutsheet import build_cutsheet
 from core.jobs import JobResult, JobService
 
 MAX_LOG_LINES = 5000
@@ -47,6 +51,24 @@ def _show_failure(parent: QWidget, error: str, details: str) -> None:
     box.exec()
 
 
+def _choose_cutsheet_file(parent: QWidget | None, start: Path) -> Path | None:
+    name, _ = QFileDialog.getSaveFileName(parent, "Save the cutsheet", str(start), "PDF files (*.pdf);;All files (*)")
+    return Path(name) if name else None
+
+
+def _open_pdf(path: Path) -> None:
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+
+@dataclass(frozen=True)
+class CutsheetState:
+    """The last cutsheet: the form it was made for, the best layouts, their score, the PDF (None when none was written)."""
+    params: dict
+    solutions: dict
+    score: tuple
+    path: Path | None
+
+
 # module-level defaults: the constructor arguments of the same names shadow the imported functions inside __init__
 _choose_destination, _confirm_overwrite, _report_save_error = choose_destination, confirm_overwrite, report_save_error
 
@@ -58,8 +80,14 @@ class MainWindow(QMainWindow):
     def __init__(self, service: JobService, *, confirm_clear: Callable[[QWidget, str], bool] | None = None,
                  report_failure: Callable[[QWidget, str, str], None] | None = None,
                  choose_destination: Callable | None = None, confirm_overwrite: Callable | None = None,
-                 report_save_error: Callable | None = None):
+                 report_save_error: Callable | None = None, choose_cutsheet: Callable | None = None,
+                 open_pdf: Callable | None = None):
         super().__init__()
+        self._choose_cutsheet = choose_cutsheet or _choose_cutsheet_file
+        self._open_pdf = open_pdf or _open_pdf
+        self._cutsheet: CutsheetState | None = None
+        self._refines = 0
+        self._best_text = ""
         self.service = service
         self._confirm_clear = confirm_clear or _ask_clear
         self._report_failure = report_failure or _show_failure
@@ -129,7 +157,15 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(1000)
         self._timer.timeout.connect(self._tick)
         self.drawer_blocks_tab.generate_requested.connect(self.start_job)
+        self.cutsheet_flow = CutsheetFlow(self)
+        self.drawer_blocks_tab.cutsheet_requested.connect(lambda params: self.start_cutsheet(params, refine=False))
+        self.drawer_blocks_tab.refine_requested.connect(lambda params: self.start_cutsheet(params, refine=True))
+        self.drawer_blocks_tab.form.changed.connect(self._update_refine)
+        self.cutsheet_flow.progress.connect(self._on_search_progress)
+        self.cutsheet_flow.finished.connect(self._on_cutsheet_found)
+        self.cutsheet_flow.failed.connect(self._on_cutsheet_failed)
         self.cancel_button.clicked.connect(self.controller.cancel)
+        self.cancel_button.clicked.connect(self.cutsheet_flow.cancel)
         self.controller.job_started.connect(self._on_job_started)
         self.controller.job_line.connect(self.append_log)
         self.controller.job_line.connect(self._count_pieces)
@@ -187,6 +223,87 @@ class MainWindow(QMainWindow):
         self.append_log("Generating %s with %s" % (part.label, dict(params)))
         return self.controller.start(part, params)
 
+    # ---- cutsheet ----
+    def start_cutsheet(self, params, *, refine: bool) -> bool:
+        if self.controller.is_running() or self.cutsheet_flow.is_running():
+            return False
+        state = self._cutsheet
+        usable = refine and state is not None and state.params == dict(params)
+        if refine and not usable:
+            return False
+        self._refines = self._refines + 1 if refine else 0
+        self.append_log("%s %s" % ("Refining the cutsheet of" if refine else "Cutsheet of", dict(params)))
+        self._best_text = ""
+        self._job_label, self._job_start, self._pieces_done = "cutsheet", time.monotonic(), 0
+        self._set_busy(True)
+        self._tick()
+        self._timer.start()
+        return self.cutsheet_flow.start(params, refine=refine, start=state.solutions if usable else None, seed=self._refines)
+
+    def _update_refine(self, *_args) -> None:
+        state = self._cutsheet
+        self.drawer_blocks_tab.set_refine_enabled(
+            state is not None and self.drawer_blocks_tab.form.params() == state.params)
+
+    def _on_search_progress(self, text: str) -> None:
+        self._best_text = text
+
+    def _end_search(self) -> None:
+        self._timer.stop()
+        self._set_busy(False)
+
+    def _on_cutsheet_failed(self, message: str) -> None:
+        self._end_search()
+        self.show_status("Cutsheet failed: %s" % message)
+        self.append_log("Cutsheet failed: %s" % message)
+        self._report_save_error(self, message)
+
+    def _on_cutsheet_found(self, result: FlowResult) -> None:
+        self._end_search()
+        old, params, score = self._cutsheet, result.params, total_score(result.solutions)
+        path = old.path if old is not None and result.refine else None
+        if result.refine and old is not None and score == old.score:
+            self._cutsheet = old
+            self._update_refine()
+            self.show_status("Refine: no better layout found (%s)" % self._summary_text(old))
+            self.append_log("Refine: no better layout")
+            return
+        pieces, hardware = drawer_block_pieces(params), drawer_block_hardware(params)
+        sheet = build_cutsheet(pieces, hardware, params, result.solutions)
+        written = self._write_cutsheet(sheet, path, get_part("drawer_blocks").output_names(params)[0])
+        self._cutsheet = CutsheetState(params, result.solutions, score, written or path)
+        self._update_refine()
+        text = self._summary_text(self._cutsheet)
+        if written:
+            self.show_status("Cutsheet saved: %s" % text)
+            self.append_log("Saved %s" % written)
+            self._open_pdf(written)
+        else:
+            self.show_status("Cutsheet cancelled, nothing written (%s)" % text)
+
+    def _summary_text(self, state: CutsheetState) -> str:
+        sheet = build_cutsheet(drawer_block_pieces(state.params), drawer_block_hardware(state.params), state.params, state.solutions)
+        area = sum(s.length * s.width for s in sheet.sheets)
+        waste = 100.0 * sum(s.waste for s in sheet.sheets) / area if area else 0.0
+        return "%d %s, waste %.1f %%" % (len(sheet.sheets), "sheet" if len(sheet.sheets) == 1 else "sheets", waste)
+
+    def _write_cutsheet(self, sheet, path: Path | None, list_name: str) -> Path | None:
+        """Write the PDF: to `path` when given (a refine), else ask. A failure is reported and another name is offered."""
+        start = Path(self.last_save_dir) / (Path(list_name).stem + " cutsheet.pdf")
+        while True:
+            target = path if path is not None else self._choose_cutsheet(self, start)
+            if target is None:
+                return None
+            try:
+                write_pdf(sheet, Path(target))
+            except OSError as e:
+                self.append_log("Cutsheet not written: %s" % e)
+                self._report_save_error(self, str(e))
+                path, start = None, Path(target)
+                continue
+            self.last_save_dir = Path(target).parent
+            return Path(target)
+
     @property
     def last_save_dir(self) -> Path:
         """The folder every save dialog starts in: remembered between launches, My Documents the first time (app.settings)."""
@@ -241,6 +358,10 @@ class MainWindow(QMainWindow):
         self._timer.start()
 
     def _tick(self) -> None:
+        if self._job_label == "cutsheet":
+            text = "Searching the cutsheet ... %d s" % int(time.monotonic() - self._job_start)
+            self.show_status(text + (" (best: %s)" % self._best_text if self._best_text else ""))
+            return
         text = "Generating %s ... %d s" % (self._job_label, int(time.monotonic() - self._job_start))
         if self._pieces_done:
             text += ", %d %s done" % (self._pieces_done, "piece" if self._pieces_done == 1 else "pieces")
@@ -279,6 +400,9 @@ class MainWindow(QMainWindow):
             self._report_failure(self, result.error, details)
 
     def closeEvent(self, event) -> None:
+        if self.cutsheet_flow.is_running():
+            self.cutsheet_flow.cancel()
+            self.cutsheet_flow.wait(30)
         if self.controller.is_running():
             self.controller.cancel()
             self.controller.wait(30)
