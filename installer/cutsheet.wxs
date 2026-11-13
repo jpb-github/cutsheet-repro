@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cutsheet Generator: per-user MSI. Built by installer/build_msi.py (WiX 5, with the Util extension).
+  Defines: StageDir (folder with the files to ship), Version (three numbers).
+  Public properties for tests and unattended installs (msiexec ... NAME=value):
+    INSTALLFOLDER  VENVDIR  CACHEDIR (default follows %CUTSHEET_CACHE_DIR%)
+  The libraries are NOT installed here: the launcher builds the virtual environment at first launch.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Cutsheet Generator" Manufacturer="Cutsheet Repro" Version="$(Version)"
+           UpgradeCode="A8FB484E-B1FD-4242-8B8A-4103C63DA9AD" Scope="perUser" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Cutsheet Generator is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Application icon (made by tools/make_icon.py): shortcut and Apps &amp; features entry. The id ends in .ico on purpose. -->
+    <Icon Id="CutsheetIcon.ico" SourceFile="$(StageDir)\app\assets\cutsheet.ico" />
+    <Property Id="ARPPRODUCTICON" Value="CutsheetIcon.ico" />
+
+    <!-- Python 3.11 to 3.14 from the python.org registry keys (64 bit). One property, several searches: the last one that
+         succeeds wins, so the ids sort from lowest to highest priority (newest version, current user before machine). -->
+    <Launch Condition="Installed OR PYTHONW"
+            Message="Cutsheet Generator needs Python 3.11 to 3.14 (the python.org installer) on this computer. Install it and run this installer again." />
+    <Property Id="PYTHONW">
+      <RegistrySearch Id="PyA01_311M" Root="HKLM" Key="Software\Python\PythonCore\3.11\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA02_311U" Root="HKCU" Key="Software\Python\PythonCore\3.11\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA03_312M" Root="HKLM" Key="Software\Python\PythonCore\3.12\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA04_312U" Root="HKCU" Key="Software\Python\PythonCore\3.12\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA05_313M" Root="HKLM" Key="Software\Python\PythonCore\3.13\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA06_313U" Root="HKCU" Key="Software\Python\PythonCore\3.13\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA07_314M" Root="HKLM" Key="Software\Python\PythonCore\3.14\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+      <RegistrySearch Id="PyA08_314U" Root="HKCU" Key="Software\Python\PythonCore\3.14\InstallPath" Type="directory" Bitness="always64"><FileSearch Name="pythonw.exe" /></RegistrySearch>
+    </Property>
+
+    <!-- Folders. INSTALLFOLDER, VENVDIR and CACHEDIR can be overridden on the command line. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Cutsheet Generator" />
+      </Directory>
+      <Directory Id="CSDATA" Name="CutsheetGenerator">
+        <Directory Id="VENVDIR" Name="venv" />
+        <Directory Id="CACHEDIR" Name="cache">
+          <Directory Id="CACHEENTRIES" Name="entries" />
+          <Directory Id="CACHETMP" Name="tmp" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="AppDataFolder">
+      <Directory Id="SETTINGSDIR" Name="CutsheetGenerator" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <!-- The app honours CUTSHEET_CACHE_DIR. The installer service cannot see the client's environment, so only the persisted
+         user variable (HKCU\Environment) is read; a CACHEDIR=... on the command line wins over both. -->
+    <Property Id="CACHEENVDIR"><RegistrySearch Id="FindCacheEnvDir" Root="HKCU" Key="Environment" Name="CUTSHEET_CACHE_DIR" Type="raw" /></Property>
+    <!-- Only an absolute path is used: a REG_EXPAND_SZ value comes back as "#%..." and a relative one means nothing here. -->
+    <SetProperty Id="CACHEDIR" Before="CostInitialize" Sequence="both" Value="[CACHEENVDIR]\"
+                  Condition="NOT CACHEDIR AND CACHEENVDIR AND NOT (CACHEENVDIR &lt;&lt; &quot;#&quot;) AND CACHEENVDIR &gt;&lt; &quot;:\&quot;" />
+
+    <!-- Files. -->
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(StageDir)\**" />
+    </ComponentGroup>
+
+    <!-- Start menu shortcut: the system pythonw runs the launcher (no console window). -->
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+      <Shortcut Id="CutsheetShortcut" Name="Cutsheet Generator" Description="Generate cutsheets for wood furniture fabrication"
+                Target="[PYTHONW]" WorkingDirectory="INSTALLFOLDER" Icon="CutsheetIcon.ico"
+                Arguments="&quot;[INSTALLFOLDER]installer\launcher\launch.pyw&quot; --app-dir &quot;[INSTALLFOLDER].&quot; --venv &quot;[VENVDIR].&quot;" />
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- Removal. Remembered paths (written at install, read back at uninstall) for RemoveFolderEx. -->
+    <Property Id="CACHEENTRIESPATH"><RegistrySearch Id="FindCacheEntries" Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="CacheEntries" Type="raw" /></Property>
+    <Property Id="CACHETMPPATH"><RegistrySearch Id="FindCacheTmp" Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="CacheTmp" Type="raw" /></Property>
+    <Property Id="INSTALLPATHREG"><RegistrySearch Id="FindInstallPath" Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="InstallPath" Type="raw" /></Property>
+    <Property Id="VENVPATHREG"><RegistrySearch Id="FindVenvPath" Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="VenvPath" Type="raw" /></Property>
+    <Component Id="Cleanup" Directory="CSDATA">
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="CacheEntries" Type="string" Value="[CACHEENTRIES]" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="CacheTmp" Type="string" Value="[CACHETMP]" />
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="VenvPath" Type="string" Value="[VENVDIR]" />
+      <!-- Only the cache's own entries and tmp folders (like Cache.clear), on uninstall. -->
+      <util:RemoveFolderEx On="uninstall" Property="CACHEENTRIESPATH" />
+      <util:RemoveFolderEx On="uninstall" Property="CACHETMPPATH" />
+      <RemoveFile Id="RemoveLauncherLog" Name="launcher.log" On="uninstall" />
+      <!-- Folders left empty: the cache folder (only if nothing else is in it, e.g. a shared CUTSHEET_CACHE_DIR) and the data folder. -->
+      <RemoveFolder Id="RemoveCacheDir" Directory="CACHEDIR" On="uninstall" />
+      <RemoveFolder Id="RemoveGfData" Directory="CSDATA" On="uninstall" />
+    </Component>
+    <!-- Window settings (.ini) in %APPDATA%\CutsheetGenerator. -->
+    <Component Id="SettingsCleanup" Directory="SETTINGSDIR">
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="Settings" Type="integer" Value="1" KeyPath="yes" />
+      <RemoveFile Id="RemoveSettingsFiles" Name="*" On="uninstall" />
+      <RemoveFolder Id="RemoveSettingsDir" Directory="SETTINGSDIR" On="uninstall" />
+    </Component>
+    <!-- The install folder, removed recursively (stray files included) only when it is the default "...\Cutsheet Generator" folder,
+         so an INSTALLFOLDER override can never delete a bigger tree. The condition keeps the path out of the registry otherwise. -->
+    <Component Id="InstallCleanup" Directory="INSTALLFOLDER" Condition="INSTALLFOLDER &gt;&lt; &quot;Cutsheet Generator\&quot; AND INSTALLFOLDER ~&gt;&gt; &quot;Cutsheet Generator\&quot;">
+      <RegistryValue Root="HKCU" Key="Software\CutsheetGenerator\Installer" Name="InstallPath" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <util:RemoveFolderEx On="uninstall" Property="INSTALLPATHREG" />
+    </Component>
+
+    <!-- The environment is removed on uninstall only; an upgrade keeps it (the launcher rebuilds it if the requirements changed). -->
+    <CustomAction Id="RemoveVenv" Directory="CSDATA" Execute="deferred" Impersonate="yes" Return="ignore"
+                  ExeCommand="cmd.exe /c rmdir /s /q &quot;[VENVPATHREG]&quot;" />
+    <!-- The remembered path must end in "venv": a wrong override can then never delete a bigger tree. -->
+    <InstallExecuteSequence>
+      <Custom Action="RemoveVenv" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND VENVPATHREG ~&gt;&gt; &quot;venv\&quot;" />
+    </InstallExecuteSequence>
+
+    <Feature Id="Main" Title="Cutsheet Generator" Level="1" AllowAdvertise="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="Cleanup" />
+      <ComponentRef Id="SettingsCleanup" />
+      <ComponentRef Id="InstallCleanup" />
+    </Feature>
+  </Package>
+</Wix>
