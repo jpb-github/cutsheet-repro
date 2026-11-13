@@ -4,8 +4,8 @@ Last updated 2026-11-13. Read `CLAUDE.md` first (layout, rules, way of working),
 
 ## Where we are
 
-- App (PySide6) cloned from the Multiboard Generator; version 0.1.0, not released. Repo: https://github.com/jpb-github/cutsheet-repro (master). Tests: `.venv\Scripts\python -m pytest` (88 pass before task 3; `tests/test_cutting.py` adds 60).
-- One tab, **Drawer Blocks**: grouped one-letter form on the left, merged list of pieces + hardware (pocket screws, pulls) top right, always-drawn perspective view of the closed block bottom right, help text and Reset / Generate on the bottom row. Generate saves the list as a CSV through the normal generator/cache/save pipeline.
+- App (PySide6) cloned from the Multiboard Generator; version 0.1.0, not released. Repo: https://github.com/jpb-github/cutsheet-repro (master). Tests: `.venv\Scripts\python -m pytest` (183 pass).
+- One tab, **Drawer Blocks**: grouped one-letter form on the left, merged list of pieces + hardware (pocket screws, pulls) top right, always-drawn perspective view of the closed block bottom right, help text and Reset / Refine / Cutsheet / Generate on the bottom row. Generate saves the list as a CSV through the normal generator/cache/save pipeline; Cutsheet writes the PDF (all eight cutsheet tasks done, nothing left in the plan).
 - Rules (corrected from `Drawer calculations.xlsx`): `core/drawer_rules.py` (exact copy in `generators/DrawerBlocks/.../d02_rules.py`, a test keeps them equal; after editing run `python tools/sync_generators.py --update-manifest`). View: `core/drawer_view.py` + `app/block_view.py`.
 - Specs and plans in `docs/superpowers/`: `specs/2026-11-13-drawer-blocks-design.md`, `specs/2026-11-13-cutsheet-design.md` (approved), `plans/2026-11-13-drawer-blocks-high-level-plan.md` (done), `plans/2026-11-13-cutsheet-high-level-plan.md`.
 
@@ -18,7 +18,7 @@ Last updated 2026-11-13. Read `CLAUDE.md` first (layout, rules, way of working),
 - [x] 5. Cutsheet data `core/cutsheet.py` (labels, pocket screw positions, cut instructions)
 - [x] 6. PDF writer `app/cutsheet_pdf.py` (Qt QPdfWriter, A4 landscape)
 - [x] 7. Cutsheet and Refine buttons (Cutsheet where View was, left of Generate), background search, save, open PDF
-- [ ] 8. Finish  <- NEXT: look at the rendered PDF, docs, full suite
+- [x] 8. Finish (PDF looked at with real fonts, cut instruction lines shortened, docs updated)
 
 Each task is detailed in its plan file just before it is executed (task 2 shows the level of detail), tests first, only that task's tests run, then marked done. Commit/push only when asked; no release unless asked.
 

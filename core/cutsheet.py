@@ -78,13 +78,13 @@ class SheetPlan:
 
 
 def _instruction(sheet: SheetPlan, cut: Cut) -> str:
+    """One short line: the cut, what it divides, the distance of the line (the kerf is on the waste side, the PDF says so once)."""
     r = cut.rect
     whole = r.x == 0 and r.y == 0 and r.w == sheet.length and r.h == sheet.width
     what = ("across the whole %s x %s sheet" % (_g(sheet.length), _g(sheet.width)) if whole else
-            "across the %s x %s part that starts %s from the left and %s from the top" % (_g(r.w), _g(r.h), _g(r.x), _g(r.y)))
+            "across the %s x %s part at (%s, %s)" % (_g(r.w), _g(r.h), _g(r.x), _g(r.y)))
     distance = cut.at - (r.x if cut.vertical else r.y)
-    return "Cut %d: %s, %s from the %s edge, kerf on the waste side" % (
-        cut.number, what, _g(distance), "left" if cut.vertical else "top")
+    return "Cut %d: %s, %s from the %s edge" % (cut.number, what, _g(distance), "left" if cut.vertical else "top")
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ Desktop app (PySide6) that generates cutsheets for the fabrication of wood furni
 
 ## Tabs
 
-- Drawer Blocks: the pieces of MDF to cut for a block of drawers (outside box, drawers on outside slides, facades), from the available space; the list, with the pocket screws and drawer pulls, is shown live in one list, the View button draws the block in perspective, Generate saves the list as a CSV. All dimensions in mm.
+- Drawer Blocks: the pieces of MDF to cut for a block of drawers (outside box, drawers on outside slides, facades), from the available space; the list, with the pocket screws and drawer pulls, is shown live in one list, a perspective view of the block is always drawn under it, Generate saves the list as a CSV. Cutsheet packs the pieces on MDF sheets (size and saw kerf in the form) with edge-to-edge cuts and writes a PDF: a summary, one page per sheet with the numbered cuts, the kerf, the pocket screw marks and the cut instructions, and the pieces drawn large with their dimensions. It searches for 15 s on up to 80 % of the cores; Refine searches further from the last result. All dimensions in mm.
 
 ## Files
 

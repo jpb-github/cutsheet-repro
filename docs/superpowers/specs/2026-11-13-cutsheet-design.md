@@ -1,4 +1,4 @@
-# Cutsheet (PDF) for the Drawer Blocks tab: design (draft for approval)
+# Cutsheet (PDF) for the Drawer Blocks tab: design (implemented, all tasks done)
 
 Builds on `2026-11-13-drawer-blocks-design.md` (the pieces, the pocket screws). All dimensions in mm.
 

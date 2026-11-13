@@ -240,6 +240,8 @@ def _sheet_pages(cs: Cutsheet, sheet: SheetPlan) -> list:
             else:
                 y, col_h = 28.0, int((PAGE_H - 14 - 28) // 4.6)
             d.text(MARGIN, y + 2, "Cuts, in this order", 3.8, bold=True)
+            d.text(MARGIN + 45, y + 2, "(x, y) is the corner of the part from the top left of the sheet; the saw kerf is on the waste side of each line",
+                   3.0, color=GREY)
             colw = (PAGE_W - 2 * MARGIN) / 2
             for n, line in enumerate(chunk):
                 col, row = divmod(n, col_h)
