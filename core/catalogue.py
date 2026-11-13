@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, Mapping
 
-from core import drawer_rules
-from core.drawer_rules import DrawerError, Piece
+from core import drawer_rules, drawer_view
+from core.drawer_rules import DrawerError, Hardware, Piece
 from core.params import Param, ParamError, fmt_mm, length_mm, normalise_values
 
 
@@ -63,15 +63,35 @@ def _out(out_dir: Path, name: str) -> str:
 
 # the parameters that are lengths (canonical "NNNmm" texts); the rules and the command line use the same names (_ become -)
 DRAWER_LENGTHS = ("width", "height", "depth", "box_clearance", "drawer_clearance", "thick", "thin", "slide_thickness", "slide_length",
-                  "slide_height", "slide_clearance")
+                  "slide_height", "slide_clearance", "screw_spacing")
 
 
 def drawer_block_pieces(p: Mapping) -> list[Piece]:
     """The pieces of the (normalised) parameters of the drawer_blocks part; raises ParamError (the rules' DrawerError, same parameter)."""
     try:
-        return drawer_rules.plan_drawer_block(drawers=p["drawers"], **{k: length_mm(p[k]) for k in DRAWER_LENGTHS})
+        return drawer_rules.plan_drawer_block(drawers=p["drawers"], **_rule_args(p))
     except DrawerError as e:
         raise ParamError(e.param, e.message)
+
+
+def drawer_block_hardware(p: Mapping) -> list[Hardware]:
+    """The pocket screws and the drawer pulls of the (normalised) parameters; raises ParamError like drawer_block_pieces."""
+    try:
+        return drawer_rules.plan_hardware(drawers=p["drawers"], screw_spacing=length_mm(p["screw_spacing"]), **_rule_args(p))
+    except DrawerError as e:
+        raise ParamError(e.param, e.message)
+
+
+def drawer_block_boxes(p: Mapping) -> list[drawer_view.Box]:
+    """Every part of the (normalised) block placed in space, for the view; raises ParamError like drawer_block_pieces."""
+    try:
+        return drawer_view.block_boxes(drawers=p["drawers"], **_rule_args(p))
+    except DrawerError as e:
+        raise ParamError(e.param, e.message)
+
+
+def _rule_args(p: Mapping) -> dict:
+    return {k: length_mm(p[k]) for k in DRAWER_LENGTHS if k != "screw_spacing"}
 
 
 def _drawer_blocks() -> Part:
@@ -88,7 +108,8 @@ def _drawer_blocks() -> Part:
               length("slide_thickness", "Slide thickness", "12mm", 0, 50, "the slides are outside the drawer, between it and the box side"),
               length("slide_length", "Slide length", "500mm", 50, 1500, "also the depth of the drawers"),
               length("slide_height", "Slide height", "35mm", 1, 200, "must not exceed the height of the drawer sides"),
-              length("slide_clearance", "Slide clearance", "0.5mm", 0, 5, "on each side of each slide (box to slide, slide to drawer)"))
+              length("slide_clearance", "Slide clearance", "0.5mm", 0, 5, "on each side of each slide (box to slide, slide to drawer)"),
+              length("screw_spacing", "Pocket screw spacing", "150mm", 50, 400, "the largest distance between two pocket screws along a joint (at least 2 per joint)"))
 
     def names(p):
         return ("Drawer Blocks - %d drawers %sx%sx%s.csv" % (p["drawers"], fmt_mm(length_mm(p["width"])), fmt_mm(length_mm(p["height"])),
@@ -101,6 +122,7 @@ def _drawer_blocks() -> Part:
         return ("--drawers", str(p["drawers"]), *opts, "--out", _out(o, names(p)[0]))
     def check(p):
         drawer_block_pieces(p)
+        drawer_block_hardware(p)
 
     return Part("drawer_blocks", "Drawer Blocks", "drawer_blocks", "Cutsheet", params,
                 "DrawerBlocks/skills/drawer-blocks-generator/scripts/build_cutlist.py", _names=names, _args=args, _check=check)

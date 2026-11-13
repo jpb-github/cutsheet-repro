@@ -6,7 +6,7 @@ import pytest
 
 from core.catalogue import PARTS, get_part
 from core.drawer_rules import pieces_to_csv
-from core.catalogue import drawer_block_pieces
+from core.catalogue import drawer_block_hardware, drawer_block_pieces
 from core.params import ParamError
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,6 +24,8 @@ def test_the_part_is_registered_with_the_defaults_of_the_spreadsheet():
     assert p["drawers"] == 2 and p["width"] == "760mm" and p["slide_height"] == "35mm" and p["slide_clearance"] == "0.5mm"
     assert PART.output_names(p) == ("Drawer Blocks - 2 drawers 760x350x540.csv",)
     assert [x.qty for x in drawer_block_pieces(p)] == [2, 2, 1, 4, 4, 2, 2]
+    assert p["screw_spacing"] == "150mm" and [(h.name, h.qty) for h in drawer_block_hardware(p)] == [
+        ("Pocket screw, box", 20), ("Pocket screw, drawers", 16), ("Drawer pull", 2)]
 
 
 def test_equal_requests_share_one_canonical_form():
@@ -32,7 +34,7 @@ def test_equal_requests_share_one_canonical_form():
 
 
 @pytest.mark.parametrize("raw, param", [({"slide_height": "142"}, "slide_height"), ({"drawers": "40"}, "drawers"),
-                                         ({"slide_length": "600"}, "slide_length"), ({"thin": "1"}, "thin"), ({"drawers": "x"}, "drawers")])
+                                         ({"slide_length": "600"}, "slide_length"), ({"thin": "1"}, "thin"), ({"screw_spacing": "10"}, "screw_spacing"), ({"drawers": "x"}, "drawers")])
 def test_invalid_requests_are_param_errors(raw, param):
     with pytest.raises(ParamError) as e:
         PART.normalise(raw)
@@ -44,7 +46,7 @@ def test_the_command_line_writes_the_csv(tmp_path):
     inv = PART.invocation(p, tmp_path)
     r = subprocess.run([sys.executable, str(SCRIPTS / "build_cutlist.py"), *inv.args], capture_output=True, text=True, cwd=tmp_path)
     assert r.returncode == 0 and r.stdout.strip().splitlines()[-1] == "OK"
-    assert (tmp_path / inv.outputs[0]).read_text(encoding="utf-8") == pieces_to_csv(drawer_block_pieces(p))
+    assert (tmp_path / inv.outputs[0]).read_text(encoding="utf-8") == pieces_to_csv(drawer_block_pieces(p), drawer_block_hardware(p))
 
 
 def test_a_failed_request_is_reported_and_writes_nothing(tmp_path):

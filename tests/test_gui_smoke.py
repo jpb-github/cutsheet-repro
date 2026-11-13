@@ -45,6 +45,7 @@ def test_generate_save_then_cache_hit(tmp_path, qapp):
         assert w.last_part.key == "drawer_blocks" and w.last_result.ok and not w.last_result.from_cache
         lines = first.read_text(encoding="utf-8").splitlines()
         assert lines[0] == "Piece,Material,Thickness,Quantity,Length,Width" and "Drawer bottom,thin,6,2,694,500" in lines
+        assert '"Pocket screw, box","32 mm, fine thread (18 mm sheet); 5 per joint x 4 joints",20' in lines and "Drawer pull,one per drawer,2" in lines
         assert "wrote Drawer Blocks - 2 drawers 760x350x540.csv" in w.log_view.toPlainText()
         run()                                                                         # the same request again: from the cache
         assert w.last_result.from_cache and second.read_text(encoding="utf-8") == first.read_text(encoding="utf-8")

@@ -51,6 +51,16 @@ The box side depth is the available depth minus the facade (thick) and the back 
 5. The slide clearance (0.5 on each side of each slide) narrows the drawer by 2 (696 -> 694, front/back 660 -> 658).
 6. Kept as in the sheet: drawer side length (the slide length), facade width, the clearance of 4 as a total.
 
+## Hardware (added after the first version)
+
+Listed after the pieces: pocket screws and drawer pulls (one per drawer, no size chosen). The slides are not listed.
+- Pocket holes are drilled in the thick sheet: the ends of the box sides (screwed to the top and the bottom: 4 joints, each as long as the box depth, 512) and the ends of the drawer fronts and backs (screwed to the drawer sides: 4 corners per drawer, each as long as the side height, 141.5). The thin back and bottoms are nailed.
+- Screw length from the thickness of the drilled sheet (Kreg chart, fine thread for MDF): up to 9.5 mm 19 mm (3/4 in), up to 12.7 25 (1 in), up to 19.1 32 (1 1/4 in; the 18 mm sheet), up to 25.4 38 (1 1/2 in), up to 38.1 50 (2 in), above 64.
+- Screws per joint = max(2, ceil(joint length / spacing) + 1) with a spacing of 150 mm (parameter "Pocket screw spacing", 50 to 400): at least 2 per corner and no more than 150 mm between screws, so tall drawers and the 512 mm box joints get more (a 141.5 corner 2, a 294 corner 3, the box joints 5).
+- Default result: pocket screws, box: 20 (5 x 4 joints); pocket screws, drawers: 16 (2 x 4 corners x 2 drawers), all 32 mm fine thread; drawer pulls: 2.
+- CSV: the pieces, an empty line, then `Hardware,Detail,Quantity` and one line per item (fields with commas are quoted).
+- Not included: the screws that hold the facade to the drawer front, nails for the back and bottoms.
+
 ## Validation (errors shown under the field, the same way as the other forms)
 
 - N >= 1, all lengths > 0, thicknesses within the sizes they must fit.

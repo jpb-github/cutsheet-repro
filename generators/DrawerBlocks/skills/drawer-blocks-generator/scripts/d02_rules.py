@@ -8,6 +8,9 @@ Construction: an outside box (two sides sandwiched between a top and a bottom, a
 facades in front of it), drawers (front and back sandwiched between the sides, the bottom nailed under, not recessed) with the
 slides outside of them. THICK is the thick sheet (sides, top, bottom, drawer parts, facades), THIN the thin one (back, bottoms).
 """
+import csv
+import io
+import math
 from dataclasses import dataclass
 
 
@@ -30,16 +33,38 @@ class Piece:
     thickness: float
 
 
+@dataclass(frozen=True)
+class Hardware:
+    name: str
+    qty: int
+    detail: str
+
+
+# Pocket screws (Kreg's chart): the length depends on the thickness of the sheet that is drilled, fine thread for MDF. (up to thickness mm, screw length mm)
+POCKET_SCREWS = ((9.5, 19), (12.7, 25), (19.1, 32), (25.4, 38), (38.1, 50))
+LONGEST_POCKET_SCREW = 64
+
+
+def pocket_screw_length(thickness: float) -> int:
+    """The length in mm of the pocket screw for a sheet of this thickness (3/8 in 19, 1/2 in 25, 3/4 in 32, 1 in 38, 1 1/2 in 50, more 64)."""
+    return next((length for limit, length in POCKET_SCREWS if thickness <= limit), LONGEST_POCKET_SCREW)
+
+
+def per_joint(joint_length: float, spacing: float) -> int:
+    """Pocket screws along a joint: at most `spacing` mm apart, at least 2 (one near each end)."""
+    return max(2, math.ceil(joint_length / spacing) + 1)
+
+
 def _n(x: float) -> float:
     """Rounded to 0.001 mm and an integer when it is one (so 756.0 is 756)."""
     x = round(x, 3)
     return int(x) if x == int(x) else x
 
 
-def plan_drawer_block(*, width: float, height: float, depth: float, box_clearance: float, drawers: int, drawer_clearance: float,
+def geometry(*, width: float, height: float, depth: float, box_clearance: float, drawers: int, drawer_clearance: float,
                       thick: float, thin: float, slide_thickness: float, slide_length: float, slide_height: float,
                       slide_clearance: float) -> list[Piece]:
-    """The pieces of the block that fits the available space width x height x depth (facades and box included).
+    """The validated sizes of the block that fits the available space width x height x depth (facades and box included).
 
     Raises DrawerError when a size would not be positive or the slides do not fit."""
     if drawers < 1:
@@ -69,6 +94,21 @@ def plan_drawer_block(*, width: float, height: float, depth: float, box_clearanc
         raise DrawerError("slide_length", "the slides (%g mm) are longer than the box depth (%g mm)" % (slide_length, panel_d))
     if slide_height > side_h:
         raise DrawerError("slide_height", "the slide height (%g mm) is more than the drawer side height (%g mm)" % (slide_height, _n(side_h)))
+    return dict(box_w=box_w, box_h=box_h, panel_d=panel_d, inner_h=inner_h, side_h=side_h, facade_h=facade_h, drawer_w=drawer_w,
+                front_w=front_w)
+
+
+KEYS = ("width", "height", "depth", "box_clearance", "drawers", "drawer_clearance", "thick", "thin", "slide_thickness", "slide_length",
+        "slide_height", "slide_clearance")
+
+
+def plan_drawer_block(*, width: float, height: float, depth: float, box_clearance: float, drawers: int, drawer_clearance: float,
+                      thick: float, thin: float, slide_thickness: float, slide_length: float, slide_height: float,
+                      slide_clearance: float) -> list[Piece]:
+    """The pieces to cut. Raises DrawerError like geometry."""
+    g = geometry(**{k: v for k, v in locals().items() if k in KEYS})
+    box_w, box_h, panel_d, inner_h, side_h, facade_h, drawer_w, front_w = (g[k] for k in (
+        "box_w", "box_h", "panel_d", "inner_h", "side_h", "facade_h", "drawer_w", "front_w"))
     return [
         Piece("Box top and bottom", "thick", 2, _n(box_w), _n(panel_d), _n(thick)),
         Piece("Box side", "thick", 2, _n(inner_h), _n(panel_d), _n(thick)),
@@ -80,8 +120,38 @@ def plan_drawer_block(*, width: float, height: float, depth: float, box_clearanc
     ]
 
 
-def pieces_to_csv(pieces: list[Piece]) -> str:
-    """The list as CSV text (header, one line per piece), lines ended by \\n."""
-    lines = ["Piece,Material,Thickness,Quantity,Length,Width"]
-    lines += ["%s,%s,%g,%d,%g,%g" % (p.name, p.material, p.thickness, p.qty, p.length, p.width) for p in pieces]
-    return "\n".join(lines) + "\n"
+
+def plan_hardware(*, screw_spacing: float, **kw) -> list[Hardware]:
+    """The pocket screws and the drawer pulls (the same keyword arguments as plan_drawer_block, plus the largest spacing of the screws).
+
+    Pocket holes are drilled in the ends of the box sides (to the top and the bottom: 4 joints along the depth of the box) and of the
+    drawer fronts and backs (to the sides: 4 corners along the height of the drawer side), in the thick sheet; the thin back and
+    bottoms are nailed. Every joint gets per_joint() screws. One pull per drawer."""
+    if screw_spacing <= 0:
+        raise DrawerError("screw_spacing", "the screw spacing must be above 0")
+    g = geometry(**kw)
+    drawers, thick = kw["drawers"], kw["thick"]
+    length = pocket_screw_length(thick)
+    spec = "%d mm, fine thread (%g mm sheet)" % (length, thick)
+    box_n, corner_n = per_joint(g["panel_d"], screw_spacing), per_joint(g["side_h"], screw_spacing)
+    return [
+        Hardware("Pocket screw, box", 4 * box_n, "%s; %d per joint x 4 joints" % (spec, box_n)),
+        Hardware("Pocket screw, drawers", 4 * corner_n * drawers, "%s; %d per corner x 4 corners x %d %s" % (
+            spec, corner_n, drawers, "drawer" if drawers == 1 else "drawers")),
+        Hardware("Drawer pull", drawers, "one per drawer"),
+    ]
+
+
+def pieces_to_csv(pieces: list[Piece], hardware: list[Hardware] | None = None) -> str:
+    """The list as CSV text: a header and one line per piece, then (when given) an empty line, a header and one line per hardware item."""
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator=chr(10))
+    w.writerow(("Piece", "Material", "Thickness", "Quantity", "Length", "Width"))
+    for p in pieces:
+        w.writerow((p.name, p.material, "%g" % p.thickness, p.qty, "%g" % p.length, "%g" % p.width))
+    if hardware:
+        w.writerow(())
+        w.writerow(("Hardware", "Detail", "Quantity"))
+        for h in hardware:
+            w.writerow((h.name, h.detail, h.qty))
+    return out.getvalue()
